@@ -7,6 +7,7 @@ from typing import List, Dict
 
 from sentence_transformers import SentenceTransformer
 import numpy as np
+import faiss
 
 class TreeChunker:
     """
@@ -98,6 +99,30 @@ class TreeChunker:
                 buf.append(line)
         flush()
         return nodes
+    
+    def build_index(self) -> None:
+        """Combine path and content, embed, normalize, and build FAISS index."""
+        with open("preprocessing/chunks.json", 'r', encoding='utf-8') as f:
+            chunks = json.load(f)
+
+        texts = []
+        meta = []
+        for node in chunks:
+            path = node['path']
+            content = node['data']
+            full_text = f"{' > '.join(path)}: {content}"
+            texts.append(full_text)
+            meta.append({'path': path, 'content': content})
+        self.metadata = meta
+
+        # embed all nodes
+        embs = self.embedder.encode(texts, convert_to_tensor=False, show_progress_bar=True)
+        embs = np.vstack(embs).astype('float32')
+        embs /= np.linalg.norm(embs, axis=1, keepdims=True)
+
+        dim = embs.shape[1]
+        self.index = faiss.IndexFlatIP(dim)
+        self.index.add(embs)
 
 
 if __name__ == "__main__":

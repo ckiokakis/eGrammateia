@@ -115,74 +115,92 @@ class VectorStoreManager:
         docs = self.store.similarity_search(query, k=k)
         return [getattr(d, "page_content", str(d)) for d in docs]
 
+
 class TreeRAGPipeline:
     """
-    RAG pipeline that embeds hierarchically structured chunks,
-    stores them in a FAISS index, retrieves relevant context,
-    and generates answers using an external LLM client.
+    RAG pipeline that loads a FAISS index from disk (via LangChain’s FAISS.load_local),
+    uses HuggingFaceEmbeddings under the hood, and retrieves with probability confidences.
+
+    If metadata.path is missing in indexed documents, optionally loads the original
+    chunks.json to recover the `path` information based on matching content.
     """
 
     def __init__(
         self,
-        chunks_json_path: str,
+        index_path: str,
         llm: 'LLMClient',
-        embedding_model_name: str = 'lighteternal/stsb-xlm-r-greek-transfer',
+        fallback_model: str = 'lighteternal/stsb-xlm-r-greek-transfer',
+        chunks_json_path: Optional[str] = None,
     ):
-        # External LLM client for generation
         self.llm = llm
 
-        # 1) Embedder
-        self.embedder = SentenceTransformer(embedding_model_name)
+        # 0) Load chunks.json for fallback mapping (optional)
+        self.chunk_map: Dict[str, List[str]] = {}
+        if chunks_json_path:
+            try:
+                with open(chunks_json_path, encoding='utf-8') as f:
+                    all_chunks = json.load(f)
+                # Build mapping: content -> path
+                for chunk in all_chunks:
+                    content = chunk.get('data', '').strip()
+                    path = chunk.get('path')
+                    if content and path:
+                        self.chunk_map[content] = path
+                logger.info("Loaded %d chunks for path fallback", len(self.chunk_map))
+            except Exception as e:
+                logger.warning("Could not load chunks.json for path fallback: %s", e)
 
-        # 2) Load chunks
-        with open(chunks_json_path, 'r', encoding='utf-8') as f:
-            self.chunks = json.load(f)
+        # 1) Figure out which embedding model to use
+        idx = Path(index_path)
+        meta_path = idx / "metadata.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            model_name = meta.get("model_name", fallback_model)
+            logger.info("Loaded embedding model: %s", model_name)
+        else:
+            model_name = fallback_model
+            logger.warning("No metadata.json found, falling back to: %s", model_name)
 
-        # 3) Placeholder for FAISS index & metadata
-        self.index: faiss.Index = None  # will be set in build_index()
-        self.metadata: List[Dict] = []
-
-    def build_index(self) -> None:
-        """Combine path and content, embed, normalize, and build FAISS index."""
-        texts = []
-        meta = []
-        for node in self.chunks:
-            path = node['path']
-            content = node['data']
-            full_text = f"{' > '.join(path)}: {content}"
-            texts.append(full_text)
-            meta.append({'path': path, 'content': content})
-        self.metadata = meta
-
-        # embed all nodes
-        embs = self.embedder.encode(texts, convert_to_tensor=False, show_progress_bar=True)
-        embs = np.vstack(embs).astype('float32')
-        embs /= np.linalg.norm(embs, axis=1, keepdims=True)
-
-        dim = embs.shape[1]
-        self.index = faiss.IndexFlatIP(dim)
-        self.index.add(embs)
+        # 2) Instantiate embeddings and load FAISS store
+        self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        self.store = FAISS.load_local(
+            index_path,
+            self.embeddings,
+            allow_dangerous_deserialization=True,
+        )
+        logger.info("FAISS index loaded from %s", index_path)
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict]:
-        """Retrieve top_k nodes by inner product similarity."""
-        if self.index is None:
-            logger.info("FAISS index not found—building it now.")
-            self.build_index()
+        """
+        Runs a similarity search, applies a softmax over the returned scores,
+        and returns each hit with a [prob=XX.XX%] confidence and a valid path.
+        """
+        docs_and_scores = self.store.similarity_search_with_relevance_scores(
+            query, k=top_k
+        )
 
-        # embed + normalize query
-        q_emb = self.embedder.encode([query], convert_to_tensor=False)
-        q_emb = np.array(q_emb, dtype='float32')
-        q_emb /= np.linalg.norm(q_emb, axis=1, keepdims=True)
+        raw_scores = np.array([score for _, score in docs_and_scores], dtype=np.float32)
+        exp_scores = np.exp(raw_scores)
+        probs = exp_scores / exp_scores.sum()
 
-        D, I = self.index.search(q_emb, top_k)
-        results = []
-        for score, idx in zip(D[0], I[0]):
-            m = self.metadata[idx]
+        results: List[Dict] = []
+        for (doc, _), prob in zip(docs_and_scores, probs):
+            # Try metadata first
+            path = doc.metadata.get('path')
+            # Fallback to chunks.json mapping if missing
+            if not path or path is None:
+                content_key = doc.page_content.strip()
+                path = self.chunk_map.get(content_key)
+            # As last resort, show unknown
+            if not path:
+                path = ['<unknown>']
+
+            print(f"Confidence: {prob:.2%}  Path: {' > '.join(path)}")
             results.append({
-                'score': float(score),
-                'path': m['path'],
-                'content': m['content']
+                'path': path,
+                'content': doc.page_content,
             })
+
         return results
 
 
@@ -239,7 +257,7 @@ class QAService2:
 > **Απαντάς ΜΟΝΟ με βάση αυτές τις πληροφορίες:**
    {info}
 
-Απαντάς στην ερώτηση: «{question}» ελέγχοντας και ακολουθώντας τους κανόνες. Αν υπάρχει σύγκρουση, κάνε ασφαλή ολοκλήρωση.
+Απαντάς στην ερώτηση/προσταγή: «{question}» ελέγχοντας και ακολουθώντας τους κανόνες. Αν υπάρχει σύγκρουση, κάνε ασφαλή ολοκλήρωση.
 """
 
     def generate(
@@ -256,15 +274,18 @@ class QAService2:
         # 1) Retrieve docs/chunks
         if self.use_tree:
             raw = self.tree.retrieve(user_query, k)  # List[Dict[path, content]]
-            # contexts = [
-            #     f"[Doc {i} | {' > '.join(d['path'])}]\n{d['content']}"
-            #     for i, d in enumerate(raw, start=1)
-            # ]
-            contexts = [
-                f"{' > '.join(d['path'])}\n{d['content']}"
-                for i, d in enumerate(raw, start=1)
-            ]
-            # contexts = [f"\n{d['content']}" for i, d in enumerate(raw, start=1)]
+
+            # build contexts safely
+            contexts: List[str] = []
+            for d in raw:
+                p = d.get('path')
+                if isinstance(p, (list, tuple)):
+                    path_str = ' > '.join(p)
+                elif isinstance(p, str):
+                    path_str = p
+                else:
+                    path_str = ''
+                contexts.append(f"{path_str}\n{d['content']}")
         else:
             flat_chunks: List[str] = self.vs.search(user_query, k=k) or []
             # exact‐match terms in angle brackets
@@ -337,7 +358,7 @@ def main() -> None:
     groq = GroqClient(api_key=cfg.groq_api_key, model=cfg.groq_model)
     llm = LLMClient(api_url=cfg.llm_api_url, model=cfg.llm_model)
     vs = VectorStoreManager(cfg.faiss_index_path, cfg.hf_embedding_model)
-    tree = TreeRAGPipeline(cfg.chunks_json_path, cfg.hf_embedding_model)
+    tree = TreeRAGPipeline(cfg.faiss_index_path, cfg.hf_embedding_model)
     use_tree = cfg.rag_type.lower() == 'tree'
     qa = QAService2(
         groq=groq,

@@ -6,6 +6,10 @@ from pathlib import Path
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+import faiss
+from sentence_transformers import SentenceTransformer
+from langchain.schema import Document
+
 
 from preprocessing.PDFParser import PDFParser
 from preprocessing.Chunker import Chunker
@@ -87,7 +91,7 @@ def main():
     args = parse_args()
     setup_logging()
 
-    # 1) Convert PDF → Markdown
+    # 1) Convert PDF → Markdown (uncomment if needed)
     # logger.info("Converting PDF %s → Markdown %s", args.input_pdf, args.markdown)
     # pdf_converter = PDFParser(
     #     num_threads=args.threads,
@@ -117,30 +121,71 @@ def main():
         chunker = TreeChunker(
             md_path=args.markdown,
             out_json=args.chunks,
-            merge_threshold=args.threshold
+            merge_threshold=args.threshold,
+            embed_model_name=args.model,
+            batch_size=args.workers  # or keep your original default
         )
 
     chunker.run()
 
-    # 3) Load chunks
+    # -------------------------------------------------------------------------
+    # 3a) If using TreeChunker, build & save a raw FAISS index directly
+    # -------------------------------------------------------------------------
+    if args.chunker_type == "tree":
+        logger.info("Building FAISS index with TreeChunker.build_index()")
+
+        # build the tree‐chunker’s own index (it uses SentenceTransformer internally)
+        chunker.embedder = SentenceTransformer(args.model)
+        chunker.build_index()
+
+        # 1) Turn your chunks into LangChain Documents with metadata:
+
+        docs = [
+            Document(
+                page_content=meta["content"],
+                metadata={"path": meta["path"]}
+            )
+            for meta in chunker.metadata
+        ]
+
+        # 2) Build a LangChain FAISS store using a LangChain embedding wrapper
+
+        hf_embedder = HuggingFaceEmbeddings(model_name=args.model)
+        vs = FAISS.from_documents(docs, hf_embedder)
+
+        # save model_name & dim
+        meta = {
+            "model_name": args.model,
+            "dim": chunker.index.d
+        }
+        with (args.index / "metadata.json").open("w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+
+        # 3) And *then* save the LangChain store locally:
+        args.index.mkdir(parents=True, exist_ok=True)
+        vs.save_local(str(args.index))
+
+        logger.info("✅ FAISS index (with metadata) saved to %s", args.index)
+        return
+
+    # -------------------------------------------------------------------------
+    # 3b) Otherwise, fall back to LangChain's FAISS.from_texts
+    # -------------------------------------------------------------------------
     logger.info("Loading %s", args.chunks)
     with args.chunks.open("r", encoding="utf-8") as f:
         chunks = json.load(f)
 
-    # 4) Extract text strings from each chunk dict
     texts = [chunk["data"] for chunk in chunks]
 
-    # 5) Embed & save
     logger.info("Embedding %d chunks with model %s", len(texts), args.model)
     embedder = HuggingFaceEmbeddings(model_name=args.model)
     vs = FAISS.from_texts(texts, embedder)
 
-    # ensure output dir exists
     args.index.mkdir(parents=True, exist_ok=True)
     vs.save_local(str(args.index))
-    logger.info("FAISS index saved to %s", args.index)
+    logger.info("✅ LangChain FAISS index saved to %s", args.index)
 
-    # 6) Persist metadata so query-time uses the same model & dim
+    # 4) Persist metadata so query-time uses the same model & dim
     test_vec = embedder.embed_query("test")
     meta = {
         "model_name": args.model,
@@ -148,6 +193,7 @@ def main():
     }
     with (args.index / "metadata.json").open("w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
+
     logger.info(
         "Wrote metadata.json with model_name=%s and dim=%d",
         meta["model_name"], meta["dim"]
