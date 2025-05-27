@@ -10,6 +10,7 @@ interface ChatInputProps {
     question: string;
     setQuestion: (question: string) => void;
     onSubmit: (payload: {
+        api: string;
         query: string;
         engine: "cortex";
         reasoning: boolean;
@@ -24,9 +25,9 @@ const suggestedActions = [
         action: "Ποιός είναι ο Πρόεδρος του τμήματος;",
     },
     {
-        title: "Στο μάθημα Τεχνικό Σχέδιο",
-        label: "τι θα κάνουμε και ποιός το διδάσκει;",
-        action: "Στο μάθημα Τεχνικό Σχέδιο τι θα κάνουμε και ποιός το διδάσκει;",
+        title: "Ποιοί είναι οι τέσσερεις",
+        label: "τομείς του τμήματος;",
+        action: "Ποιοί είναι οι τέσσερεις τομείς του τμήματος;",
     },
 ];
 
@@ -40,7 +41,7 @@ export const ChatInput = ({
     const [reasoning, setReasoning] = useState(false);
 
     const handleSubmit = (text: string) => {
-        onSubmit({ query: text, engine: "cortex", reasoning });
+        onSubmit({ api: "41b9b1b5-9230-4a71-90b8-834996ff29c3", query: text, engine: "cortex", reasoning });
         setShowSuggestions(false);
     };
 

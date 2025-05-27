@@ -26,7 +26,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 class Config:
     # LLM API settings
     llm_api_url: str = os.getenv("LLM_API_URL", "http://10.240.138.254:11434/api/chat")
-    llm_model: str = os.getenv("LLM_MODEL", "chat:llama3.2")
+    llm_model: str = os.getenv("LLM_MODEL", "chat:llama3.1")
     groq_api_key: str = os.getenv("GROQ_API_KEY", "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")
     groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
@@ -170,35 +170,101 @@ class TreeRAGPipeline:
         )
         logger.info("FAISS index loaded from %s", index_path)
 
+
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict]:
         """
-        Runs a similarity search, applies a softmax over the returned scores,
-        and returns each hit with a [prob=XX.XX%] confidence and a valid path.
+        1) Run FAISS search → raw_scores
+        2) Compute three sets of sims: orig, path-text, content-text
+        3) Softmax‐normalize each individually → prob_orig, prob_path, prob_ctx
+        4) Weighted‐sum → combined_raw → softmax → prob_combined
+        5) Hybrid select (floor + cumulative)
+        6) Print all 3 probs + path/context strings
         """
+        # 1) Get docs + FAISS scores
         docs_and_scores = self.store.similarity_search_with_relevance_scores(
             query, k=top_k
         )
+        docs, raw_scores = zip(*docs_and_scores)
+        raw_scores = np.array(raw_scores, dtype=np.float32)
 
-        raw_scores = np.array([score for _, score in docs_and_scores], dtype=np.float32)
-        exp_scores = np.exp(raw_scores)
-        probs = exp_scores / exp_scores.sum()
+        # 2) Embed query once
+        query_emb = np.array(self.embeddings.embed_query(query), dtype=np.float32)
 
+        # 3) Prepare path-texts & content-texts
+        path_texts = []
+        for doc in docs:
+            path = doc.metadata.get("path")
+            if path:
+                path_texts.append(" > ".join(path))
+            else:
+                key = doc.page_content.strip()
+                path_texts.append(" > ".join(self.chunk_map.get(key, [""])))
+
+        content_texts = [doc.page_content for doc in docs]
+
+        # 4) Embed those
+        path_embs    = np.array(self.embeddings.embed_documents(path_texts), dtype=np.float32)
+        content_embs = np.array(self.embeddings.embed_documents(content_texts), dtype=np.float32)
+
+        # 5) Cosine‐sim helper
+        def cos_sim(a: np.ndarray, B: np.ndarray):
+            a_norm = np.linalg.norm(a)
+            B_norms = np.linalg.norm(B, axis=1)
+            return (B @ a) / (a_norm * B_norms + 1e-8)
+
+        sim_path    = cos_sim(query_emb, path_embs)
+        sim_content = cos_sim(query_emb, content_embs)
+
+        # 6) Softmax‐normalize each signal separately
+        def softmax(x: np.ndarray):
+            ex = np.exp(x - x.max())
+            return ex / ex.sum()
+
+        prob_orig    = softmax(raw_scores)
+        prob_path    = softmax(sim_path)
+        prob_context = softmax(sim_content)
+
+        # 7) Combine with weights and renormalize
+        w0, w1, w2 = 0.6, 0.2, 0.2
+        combined_raw = w0 * prob_orig + w1 * prob_path + w2 * prob_context
+        prob_combined = softmax(combined_raw)
+
+        # 8) Hybrid selection (floor + cumulative)
+        scored = sorted(
+            zip(docs, prob_combined, prob_path, prob_context),
+            key=lambda tpl: tpl[1],
+            reverse=True
+        )
+
+        MIN_CONF, CUM_THRESH = 0.005, 0.75
+        selected, cum = [], 0.0
+        for doc, p_comb, p_path, p_ctx in scored:
+            if p_comb < MIN_CONF:
+                continue
+            if len(selected) >= top_k or cum >= CUM_THRESH:
+                break
+            selected.append((doc, p_comb, p_path, p_ctx))
+            cum += p_comb
+
+        # 9) Print and collect results
         results: List[Dict] = []
-        for (doc, _), prob in zip(docs_and_scores, probs):
-            # Try metadata first
-            path = doc.metadata.get('path')
-            # Fallback to chunks.json mapping if missing
-            if not path or path is None:
-                content_key = doc.page_content.strip()
-                path = self.chunk_map.get(content_key)
-            # As last resort, show unknown
-            if not path:
-                path = ['<unknown>']
+        for doc, p_comb, p_path, p_ctx in scored: # selected
+            # Resolve path fallback
+            path = doc.metadata.get("path") \
+                   or self.chunk_map.get(doc.page_content.strip()) \
+                   or ["<unknown>"]
+            # Print all three
+            print(f"Combined prob: {p_comb:.2%}")
+            print(f"Path    prob: {p_path:.2%}, Path:    {' > '.join(path)}")
+            print(f"Context prob: {p_ctx:.2%}, Context: {doc.page_content!r}")
+            print("-" * 60)
 
-            print(f"Confidence: {prob:.2%}  Path: {' > '.join(path)}")
             results.append({
-                'path': path,
-                'content': doc.page_content,
+                "path": path,
+                "content": doc.page_content,
+                "combined_prob": float(p_comb),
+                "path_prob":     float(p_path),
+                "context_prob":  float(p_ctx),
             })
 
         return results
@@ -327,6 +393,9 @@ class WebSocketQA:
         try:
             async for raw in ws:
                 data = json.loads(raw)
+                query = data.get('api', '')
+                if api != "41b9b1b5-9230-4a71-90b8-834996ff29c3":
+                    raise Exception("Incorrect API key")
                 query = data.get('query', '')
                 engine = data.get('engine', 'groq')
                 logger.info("Received query=%r engine=%s", query, engine)

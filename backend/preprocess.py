@@ -153,17 +153,16 @@ def main():
         hf_embedder = HuggingFaceEmbeddings(model_name=args.model)
         vs = FAISS.from_documents(docs, hf_embedder)
 
+        args.index.mkdir(parents=True, exist_ok=True)
+        vs.save_local(str(args.index))
+
         # save model_name & dim
         meta = {
             "model_name": args.model,
             "dim": chunker.index.d
         }
         with (args.index / "metadata.json").open("w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
-
-        # 3) And *then* save the LangChain store locally:
-        args.index.mkdir(parents=True, exist_ok=True)
-        vs.save_local(str(args.index))
+            json.dump(meta, f, ensure_ascii=False, indent=2)        
 
         logger.info("✅ FAISS index (with metadata) saved to %s", args.index)
         return
