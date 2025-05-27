@@ -41,7 +41,7 @@ export const ChatInput = ({
     const [reasoning, setReasoning] = useState(false);
 
     const handleSubmit = (text: string) => {
-        onSubmit({ api: "41b9b1b5-9230-4a71-90b8-834996ff29c3", query: text, engine: "cortex", reasoning });
+        onSubmit({ api: "41b9b1b5-9230-4a71-90b8-834996ff29c3", query: text, engine: "opensource", reasoning });
         setShowSuggestions(false);
     };
 

@@ -54,7 +54,7 @@ def send_query(prompt: str, engine: str = "opensource") -> str:
     (concatenated until the “[END]” sentinel).
     """
     ws = create_connection(WS_URL)
-    ws.send(json.dumps({"query": prompt, "engine": engine}))
+    ws.send(json.dumps({"api": "41b9b1b5-9230-4a71-90b8-834996ff29c3", "query": prompt, "engine": engine}))
     full_reply = ""
     while True:
         chunk = ws.recv()
