@@ -26,11 +26,12 @@ export function Chat() {
 
   // Now accepts the full payload object
   async function handleSubmit(payload: {
+    api: string;
     query: string;
-    engine: "groq";
+    engine: "opensource";
     reasoning: boolean;
   }) {
-    const { query, engine, reasoning } = payload;
+    const { api, query, engine, reasoning } = payload;
 
     // guard: socket open + not already loading
     if (!socket || socket.readyState !== WebSocket.OPEN || isLoading) return;
@@ -45,7 +46,7 @@ export function Chat() {
     ]);
 
     // send the full JSON payload
-    socket.send(JSON.stringify({ query, engine, reasoning }));
+    socket.send(JSON.stringify({ api, query, engine, reasoning }));
 
     // clear the input box
     setQuestion("");

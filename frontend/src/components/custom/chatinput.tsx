@@ -12,7 +12,7 @@ interface ChatInputProps {
     onSubmit: (payload: {
         api: string;
         query: string;
-        engine: "cortex";
+        engine: "opensource";
         reasoning: boolean;
     }) => void;
     isLoading: boolean;
