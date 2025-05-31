@@ -12,10 +12,11 @@ interface ChatInputProps {
     onSubmit: (payload: {
         api: string;
         query: string;
-        engine: "opensource";
+        engine: "groq" | "opensource";
         reasoning: boolean;
     }) => void;
     isLoading: boolean;
+    engine: "groq" | "opensource";
 }
 
 const suggestedActions = [
@@ -36,12 +37,18 @@ export const ChatInput = ({
     setQuestion,
     onSubmit,
     isLoading,
+    engine, // <- new prop
 }: ChatInputProps) => {
     const [showSuggestions, setShowSuggestions] = useState(true);
     const [reasoning, setReasoning] = useState(false);
 
     const handleSubmit = (text: string) => {
-        onSubmit({ api: "41b9b1b5-9230-4a71-90b8-834996ff29c3", query: text, engine: "opensource", reasoning });
+        onSubmit({
+            api: "41b9b1b5-9230-4a71-90b8-834996ff29c3",
+            query: text,
+            engine, // <- use selected engine
+            reasoning,
+        });
         setShowSuggestions(false);
     };
 

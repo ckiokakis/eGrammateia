@@ -15,6 +15,7 @@ export function Chat() {
   const [messages, setMessages] = useState<message[]>([]);
   const [question, setQuestion] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [engine, setEngine] = useState<"groq" | "opensource">("opensource");
 
   const handlerRef = useRef<((e: MessageEvent) => void) | null>(null);
   const cleanup = () => {
@@ -24,43 +25,36 @@ export function Chat() {
     }
   };
 
-  // Now accepts the full payload object
   async function handleSubmit(payload: {
     api: string;
     query: string;
-    engine: "opensource";
+    engine?: "groq" | "opensource";
     reasoning: boolean;
   }) {
-    const { api, query, engine, reasoning } = payload;
+    const { api, query, reasoning } = payload;
+    const selectedEngine = payload.engine || engine;
 
-    // guard: socket open + not already loading
     if (!socket || socket.readyState !== WebSocket.OPEN || isLoading) return;
     setIsLoading(true);
     cleanup();
 
-    // add the user's message locally
     const traceId = uuidv4();
     setMessages((prev) => [
       ...prev,
       { content: query, role: "user", id: traceId },
     ]);
 
-    // send the full JSON payload
-    socket.send(JSON.stringify({ api, query, engine, reasoning }));
-
-    // clear the input box
+    socket.send(JSON.stringify({ api, query, engine: selectedEngine, reasoning }));
     setQuestion("");
 
     try {
       const onMessage = (event: MessageEvent) => {
-        // end-of-stream marker
         if (event.data.includes("[END]")) {
           cleanup();
           setIsLoading(false);
           return;
         }
 
-        // append or start assistant message
         setMessages((prev) => {
           const last = prev[prev.length - 1];
           const updatedContent =
@@ -90,26 +84,24 @@ export function Chat() {
 
   return (
     <div className="flex flex-col min-w-0 h-dvh bg-background">
-      <Header />
+      <Header engine={engine} setEngine={setEngine} />
 
-      <div
-        className="flex flex-col flex-1 overflow-y-scroll gap-6 pt-4"
-        ref={messagesContainerRef}
-      >
-        {messages.length === 0 && <Overview />}
-        {messages.map((m) => (
-          <PreviewMessage key={m.id} message={m} />
+      <div className="flex flex-col min-w-0 gap-6 flex-1 overflow-y-scroll pt-4" ref={messagesContainerRef}>
+        {messages.length == 0 && <Overview />}
+        {messages.map((message, index) => (
+          <PreviewMessage key={index} message={message} />
         ))}
         {isLoading && <ThinkingMessage />}
-        <div ref={messagesEndRef} className="h-[24px] w-[24px]" />
+        <div ref={messagesEndRef} className="shrink-0 min-w-[24px] min-h-[24px]"/>
       </div>
 
-      <div className="flex mx-auto px-4 bg-background pb-4 md:pb-6 w-full md:max-w-3xl gap-2">
+      <div className="flex mx-auto px-4 bg-background pb-4 md:pb-6 gap-2 w-full md:max-w-3xl">
         <ChatInput
           question={question}
           setQuestion={setQuestion}
           onSubmit={handleSubmit}
           isLoading={isLoading}
+          engine={engine}
         />
       </div>
 
