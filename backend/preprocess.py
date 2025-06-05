@@ -9,6 +9,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.schema import Document
 
+from preprocessing.PDFParser import PDFParser
 from preprocessing.TreeChunker import TreeChunker
 from dotenv import load_dotenv
 
@@ -20,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Process PDF → Markdown → TreeChunked Chunks → FAISS index"
     )
-    parser.add_argument("input_pdf", type=Path, help="Path to the input PDF file")
+    parser.add_argument("--input_pdf", type=Path, help="Path to the input PDF file")
     parser.add_argument(
         "--markdown",
         type=Path,
@@ -57,6 +58,18 @@ def parse_args() -> argparse.Namespace:
         default=4,
         help="Number of worker processes"
     )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="Threads per worker for the conversion pipeline",
+    )
+    parser.add_argument(
+        "--download",
+        type=bool,
+        default=False,
+        help="Download the study guide again"
+    )
     return parser.parse_args()
 
 
@@ -72,10 +85,30 @@ def main():
     args = parse_args()
     setup_logging()
 
-    logger.info(
-        "Chunking Markdown %s → JSON %s using TreeChunker",
-        args.markdown, args.chunks
-    )
+    if args.download:
+        downloader = StudyGuideDownloader(
+            base_url="https://www.ece.upatras.gr/index.php/el/curriculum.html",
+            download_dir="docs",
+            verify_ssl=False  # Only needed if you have certificate issues
+        )
+
+        downloaded_file_path = downloader.download_first_study_guide()
+        logger.info(f"Saved to: {downloaded_file_path}")
+    
+    if input_pdf or args.download:
+        pdf_path =  downloaded_file_path if args.download and downloaded_file_path else args.input_pdf
+
+        logger.info("Converting PDF %s → Markdown %s", pdf_path, args.markdown)
+        pdf_converter = PDFParser(
+            num_threads=args.threads,
+            max_workers=args.workers
+        )
+        pdf_converter.convert(pdf_path, args.markdown)
+
+        logger.info(
+            "Chunking Markdown %s → JSON %s using TreeChunker",
+            args.markdown, args.chunks
+        )
 
     chunker = TreeChunker(
         md_path=args.markdown,

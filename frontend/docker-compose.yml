@@ -1,0 +1,29 @@
+services:
+  front-end:
+    container_name: egrammateia-frontend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: egrammateia-frontend:latest
+    ports:
+    - 3000:80
+    # expose:
+    #   - 8501
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    networks:
+      - proxy-network
+    # environment:
+    #   VIRTUAL_HOST: ece.egrammateia.upatras.gr
+    #   VIRTUAL_PORT: 8501
+    #   LETSENCRYPT_HOST: ece.egrammateia.upatras.gr
+    #   LETSENCRYPT_EMAIL: christoskiokakis@gmail.com
+
+# networks:
+#   proxy-network:
+#     name: proxy-network
+#     driver: bridge
+networks:
+  proxy-network:
+    external: true

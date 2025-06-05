@@ -1,6 +1,6 @@
 import './App.css'
 import { Chat } from './pages/chat/chat'
-import AdminPanel from './pages/admin' 
+// import AdminPanel from './pages/admin' 
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext'
 

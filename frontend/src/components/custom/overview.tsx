@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { MessageCircle, BotIcon } from 'lucide-react';
+// import { MessageCircle, BotIcon } from 'lucide-react';
 import logo from '@/assets/images/LogoVersion2ba.png';
 
 export const Overview = () => {

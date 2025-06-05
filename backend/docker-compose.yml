@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app
+    ports:
+      - "8090:8090"
+    # environment:
+    #   LLM_API_URL: http://your_llm_url:port/api/chat
+    #   LLM_MODEL: chat:llama3.1
+    #   GROQ_API_KEY: your_real_key
+    #   GROQ_MODEL: llama-3.3-70b-versatile
+    #   FAISS_INDEX_PATH: /app/faiss_index
+    #   HF_EMBEDDING_MODEL: lighteternal/stsb-xlm-r-greek-transfer
+    #   CHUNKS_JSON_PATH: /app/preprocessing/chunks.json
+    #   WS_HOST: 0.0.0.0
+    #   WS_PORT: 8090
+    #   FRONT_API_KEY: some_frontend_secret
+    volumes:
+      - ./faiss_index:/app/faiss_index
+      - ./preprocessing:/app/preprocessing
+    restart: unless-stopped
+
+networks:
+  proxy-network:
+    external: true

@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  vpn:
+    image: poyaz/forticlient:latest
+    container_name: forticlient-vpn
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+      - /dev/ppp
+    environment:
+      - VPN_ADDR=vpn.netcompany.com:443
+      - VPN_USER=ckiokak
+      - VPN_PASS=R0d0n@s96701212Ro!
+    restart: unless-stopped
+    networks:
+      - proxy-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./faiss_index:/app/faiss_index
+      - ./preprocessing:/app/preprocessing
+    restart: unless-stopped
+    network_mode: "service:vpn"
+
+networks:
+  proxy-network:
+    name: proxy-network
+    driver: bridge
