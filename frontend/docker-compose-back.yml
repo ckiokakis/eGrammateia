@@ -1,10 +1,10 @@
 services:
-  app:
-    container_name: egrammateia-frontend-backend
+  front-end:
+    container_name: egrammateia-frontend
     build:
       context: .
-      dockerfile: DockerfileBack
-    image: egrammateia-frontend-backend:latest
+      dockerfile: Dockerfile
+    image: egrammateia-frontend:latest
     # ports:
     # - 3000:80
     expose:
@@ -17,6 +17,16 @@ services:
       VIRTUAL_PORT: 80
       LETSENCRYPT_HOST: egrammateia.kiokakis.com
       LETSENCRYPT_EMAIL: christoskiokakis@gmail.com
+    networks:
+      - proxy-network
+  back-end:
+    build:
+      context: .
+      dockerfile: DockerfileBack
+    container_name: app
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
     networks:
       - proxy-network
 
