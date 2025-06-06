@@ -107,7 +107,7 @@ class TreeRAGPipeline:
             ex = np.exp(x - x.max())
             return ex / ex.sum()
 
-        prob_combined = softmax(0.6 * softmax(raw_scores) + 0.2 * softmax(cos_sim(query_emb, path_embs)) + 0.2 * softmax(cos_sim(query_emb, content_embs)))
+        prob_combined = softmax(0 * softmax(raw_scores) + 0.2 * softmax(cos_sim(query_emb, path_embs)) + 0.8 * softmax(cos_sim(query_emb, content_embs)))
         scored = sorted(zip(docs, prob_combined), key=lambda x: x[1], reverse=True)
 
         results = []
@@ -117,7 +117,7 @@ class TreeRAGPipeline:
                 break
             cum += score
             path = doc.metadata.get("path") or self.chunk_map.get(doc.page_content.strip(), ["<unknown>"])
-            results.append({"path": path, "content": doc.page_content})
+            results.append({"path": path, "content": doc.page_content, "score": score})
 
         return results
 
@@ -160,6 +160,7 @@ class QAService:
 
     def generate(self, user_query: str, engine: Literal['groq', 'opensource'] = 'groq', k: int = 3) -> str:
         results = self.tree.retrieve(user_query, k)
+        print([r['score'] for r in results])
         contexts = [f"{' > '.join(r['path'])}\n{r['content']}" for r in results]
         prompt = self._build_prompt(contexts, user_query)
         return self.llm.chat([{"role": "user", "content": prompt}]) if engine == 'opensource' else self.groq.complete(prompt)

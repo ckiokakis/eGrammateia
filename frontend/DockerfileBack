@@ -1,0 +1,43 @@
+# Stage 1: Build the frontend
+FROM node:18 AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+RUN npm run build
+
+# Stage 2: Final image with NGINX + Python backend
+FROM python:3.11-slim
+
+# Install nginx
+RUN apt-get update && \
+    apt-get install -y nginx && \
+    apt-get clean
+
+# Set working directory
+WORKDIR /app
+
+# Copy frontend build from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy Python backend script
+COPY dummy_backend.py .
+
+# Install Python dependencies (only stdlib used here, but included for general cases)
+# RUN pip install -r requirements.txt
+
+# Expose ports
+EXPOSE 80
+EXPOSE 8090 
+
+# Startup script to run both nginx and dummy_backend.py
+COPY start.sh .
+RUN chmod +x start.sh
+
+CMD ["./start.sh"]
