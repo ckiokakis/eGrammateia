@@ -32,10 +32,12 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Copy Python backend script
 COPY dummy_backend.py .
 
-# Install Python dependencies (only stdlib used here, but included for general cases)
-# RUN pip install -r requirements.txt
+FROM nginx:stable-alpine
 
-# Expose ports
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 EXPOSE 80
 EXPOSE 8090 
 
