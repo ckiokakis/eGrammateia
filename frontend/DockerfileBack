@@ -10,12 +10,15 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Final image with NGINX + Python backend
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 # Install nginx
-RUN apt-get update && \
-    apt-get install -y nginx && \
-    apt-get clean
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir websockets
 
 # Set working directory
 WORKDIR /app
