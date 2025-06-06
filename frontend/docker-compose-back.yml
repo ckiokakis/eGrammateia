@@ -17,3 +17,9 @@ services:
       VIRTUAL_PORT: 80
       LETSENCRYPT_HOST: egrammateia.kiokakis.com
       LETSENCRYPT_EMAIL: christoskiokakis@gmail.com
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    external: true
