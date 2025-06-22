@@ -5,7 +5,13 @@ import { Markdown } from "./markdown";
 import type { message } from "../../interfaces/interfaces";
 import { MessageActions } from "@/components/custom/actions";
 
-export const PreviewMessage = ({ message }: { message: message }) => (
+export const PreviewMessage = ({
+  message,
+  type = "normal",               // ⬅ NEW: default “normal”
+}: {
+  message: message;
+  type?: "normal" | "error";       // ⬅ NEW: accept “error”
+}) => (
   <motion.div
     className="w-full mx-auto max-w-3xl px-4 group/message"
     initial={{ y: 5, opacity: 0 }}
@@ -25,7 +31,14 @@ export const PreviewMessage = ({ message }: { message: message }) => (
           <SparklesIcon size={14} />
         </div>
       )}
-      <div className="flex flex-col w-full">
+
+      {/* ⬇ just add the red text class when type === "error" */}
+      <div
+        className={cx(
+          "flex flex-col w-full",
+          type === "error" && "text-red-500"
+        )}
+      >
         {message.content && (
           <div className="flex flex-col gap-4 text-left">
             <Markdown>{message.content}</Markdown>

@@ -36,6 +36,9 @@ cfg = Config()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 logger = logging.getLogger(__name__)
 
+def error_payload(msg: str, code: int = 500) -> str:
+    return json.dumps({"type": "error", "code": code, "message": msg})
+
 # --- LLM Clients ---
 class LLMClient:
     def __init__(self, api_url: str, model: str):
@@ -58,7 +61,7 @@ class LLMClient:
             return data.get("message", {}).get("content", "No response")
         except requests.RequestException as err:
             logger.error("LLM error: %s", err)
-            return f"Error: {err}"
+            raise Exception(f"Cannot reach Opensource LLM right now. Check your VPN connection or try later.")
 
 class GroqClient:
     def __init__(self, api_key: str, model: str):
@@ -89,6 +92,7 @@ class TreeRAGPipeline:
                             self.chunk_map[content] = path
             except Exception as e:
                 logger.warning("Could not load chunks.json: %s", e)
+                raise Exception("Could not load chunks.json: %s", e)
 
     def retrieve(self, query: str, top_k: int = 5) -> List[Dict]:
         docs_and_scores = self.store.similarity_search_with_relevance_scores(query, k=top_k)
@@ -113,7 +117,7 @@ class TreeRAGPipeline:
         results = []
         cum = 0.0
         for doc, score in scored:
-            if score < 0.005 or cum >= 0.75:
+            if score < 0.05 or cum >= 0.75:
                 break
             cum += score
             path = doc.metadata.get("path") or self.chunk_map.get(doc.page_content.strip(), ["<unknown>"])
@@ -159,8 +163,10 @@ class QAService:
 """
 
     def generate(self, user_query: str, engine: Literal['groq', 'opensource'] = 'groq', k: int = 3) -> str:
+        start = time.time()
         results = self.tree.retrieve(user_query, k)
-        print([r['score'] for r in results])
+        logger.info("Retrived in %.2f sec", time.time()-start)
+        logger.info(f"Scores: {[r['score'] for r in results]}")
         contexts = [f"{' > '.join(r['path'])}\n{r['content']}" for r in results]
         prompt = self._build_prompt(contexts, user_query)
         return self.llm.chat([{"role": "user", "content": prompt}]) if engine == 'opensource' else self.groq.complete(prompt)
@@ -191,8 +197,12 @@ class WebSocketQA:
                 await ws.send("[END]")
         except websockets.exceptions.ConnectionClosed:
             logger.info("Client disconnected: %s", ws.remote_address)
-        except Exception:
-            logger.exception("Handler error:")
+            await ws.send(error_payload(str("Client disconnected: %s", ws.remote_address), 500))
+            await ws.close(code=1011)  
+        except Exception as exc:
+            logger.exception("Unhandled")
+            await ws.send(error_payload(str(exc), 500))
+            await ws.close(code=1011)   
 
     def run(self):
         logger.info("Starting server at %s:%d", self.host, self.port)
