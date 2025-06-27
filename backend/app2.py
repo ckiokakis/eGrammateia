@@ -27,7 +27,7 @@ class Config:
     # LLM API settings
     llm_api_url: str = os.getenv("LLM_API_URL", "http://10.240.138.254:11434/api/chat")
     llm_model: str = os.getenv("LLM_MODEL", "chat:llama3.1")
-    groq_api_key: str = os.getenv("GROQ_API_KEY", "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")
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
     groq_model: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     # FAISS & embeddings
